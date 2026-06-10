@@ -1,0 +1,21 @@
+# macOS
+.DS_Store
+
+# Xcode
+DerivedData/
+build/
+*.xcuserstate
+xcuserdata/
+*.moved-aside
+
+# Swift Package Manager
+.build/
+Package.resolved
+
+# App signing
+*.mobileprovision
+*.cer
+*.p12
+
+# Archives
+*.xcarchive
