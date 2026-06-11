@@ -64,7 +64,8 @@ struct CaptionScreen: View {
             Text(saveMessage ?? "")
         }
         .task {
-            if case .idle = session.state {
+            session.refreshPermissions()
+            if case .idle = session.state, session.canAutoStart {
                 await session.start()
             }
         }
@@ -105,6 +106,8 @@ struct CaptionScreen: View {
                 .frame(maxWidth: .infinity, minHeight: 260, alignment: .center)
                 .multilineTextAlignment(.center)
 
+            permissionView
+
             hintView
 
             recentList
@@ -121,6 +124,8 @@ struct CaptionScreen: View {
                     .lineLimit(4)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                     .multilineTextAlignment(.center)
+
+                permissionView
 
                 hintView
             }
@@ -142,6 +147,27 @@ struct CaptionScreen: View {
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var permissionView: some View {
+        if !session.canAutoStart && session.state != .listening {
+            VStack(spacing: 12) {
+                Text(session.permissionStatusText)
+                    .font(.title3.weight(.semibold))
+                    .multilineTextAlignment(.center)
+
+                Button {
+                    session.requestAutoStart()
+                } label: {
+                    Label("启用麦克风和语音识别", systemImage: "mic.badge.plus")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(CaptionButtonStyle())
+            }
+            .padding(16)
+            .background(.primary.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
+        }
     }
 
     private var hintView: some View {

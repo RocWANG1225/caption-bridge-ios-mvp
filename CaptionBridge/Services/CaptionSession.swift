@@ -18,6 +18,8 @@ final class CaptionSession: ObservableObject {
     @Published private(set) var partialText = ""
     @Published private(set) var inputLevel: Float = 0
     @Published private(set) var noiseHint: String?
+    @Published private(set) var permissionStatusText = "点击开始后允许麦克风和语音识别"
+    @Published private(set) var canAutoStart = false
 
     private let speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "zh_CN"))
     private let audioEngine = AVAudioEngine()
@@ -43,12 +45,30 @@ final class CaptionSession: ObservableObject {
         }
     }
 
+    func refreshPermissions() {
+        let microphoneReady = microphonePermissionGranted()
+        let speechReady = SFSpeechRecognizer.authorizationStatus() == .authorized
+        canAutoStart = microphoneReady && speechReady
+
+        switch (microphoneReady, speechReady) {
+        case (true, true):
+            permissionStatusText = "权限已开启，可以开始字幕"
+        case (false, true):
+            permissionStatusText = "需要开启麦克风权限"
+        case (true, false):
+            permissionStatusText = "需要开启语音识别权限"
+        case (false, false):
+            permissionStatusText = "需要开启麦克风和语音识别权限"
+        }
+    }
+
     func start() async {
         guard state != .listening else { return }
         state = .requestingPermission
 
         do {
             try await requestPermissions()
+            refreshPermissions()
             try startRecognition()
             UIApplication.shared.isIdleTimerDisabled = true
             state = .listening
@@ -108,23 +128,36 @@ final class CaptionSession: ObservableObject {
     }
 
     private func requestPermissions() async throws {
-        let speechAllowed = await withCheckedContinuation { continuation in
-            SFSpeechRecognizer.requestAuthorization { status in
-                continuation.resume(returning: status == .authorized)
-            }
+        let microphoneAllowed = await requestMicrophonePermission()
+        refreshPermissions()
+        guard microphoneAllowed else {
+            throw CaptionError.permissionDenied("需要允许麦克风权限，才能听到外放声音。")
         }
 
+        let speechAllowed = await requestSpeechPermission()
+        refreshPermissions()
         guard speechAllowed else {
             throw CaptionError.permissionDenied("需要允许语音识别权限，才能生成实时字幕。")
         }
+    }
 
-        let microphoneAllowed = await withCheckedContinuation { continuation in
-            AVAudioSession.sharedInstance().requestRecordPermission { allowed in
+    private func microphonePermissionGranted() -> Bool {
+        AVAudioApplication.shared.recordPermission == .granted
+    }
+
+    private func requestMicrophonePermission() async -> Bool {
+        await withCheckedContinuation { continuation in
+            AVAudioApplication.requestRecordPermission { allowed in
                 continuation.resume(returning: allowed)
             }
         }
-        guard microphoneAllowed else {
-            throw CaptionError.permissionDenied("需要允许麦克风权限，才能听到外放声音。")
+    }
+
+    private func requestSpeechPermission() async -> Bool {
+        await withCheckedContinuation { continuation in
+            SFSpeechRecognizer.requestAuthorization { status in
+                continuation.resume(returning: status == .authorized)
+            }
         }
     }
 
@@ -137,7 +170,7 @@ final class CaptionSession: ObservableObject {
         }
 
         let audioSession = AVAudioSession.sharedInstance()
-        try audioSession.setCategory(.playAndRecord, mode: .measurement, options: [.defaultToSpeaker, .allowBluetooth])
+        try audioSession.setCategory(.playAndRecord, mode: .measurement, options: [.defaultToSpeaker, .allowBluetoothHFP])
         try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
 
         let request = SFSpeechAudioBufferRecognitionRequest()
