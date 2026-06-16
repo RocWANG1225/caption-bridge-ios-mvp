@@ -3,7 +3,6 @@ import SwiftUI
 struct CaptionScreen: View {
     @EnvironmentObject private var session: CaptionSession
     @EnvironmentObject private var settings: CaptionSettings
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     @State private var showSettings = false
     @State private var showEndDialog = false
@@ -22,9 +21,11 @@ struct CaptionScreen: View {
                     portraitBody
                 }
 
-                microphoneButton
+                Spacer(minLength: 18)
 
-                secondaryControlBar
+                primaryControlBar
+
+                hintView
             }
             .foregroundStyle(settings.primaryText)
             .padding(.horizontal, 20)
@@ -99,56 +100,14 @@ struct CaptionScreen: View {
         VStack(alignment: .leading, spacing: 18) {
             Spacer(minLength: 8)
 
-            latestCaptionText(fontSize: latestFontSize, lineLimit: 5)
-                .frame(maxWidth: .infinity, minHeight: 260, alignment: .center)
-
-            hintView
-
-            recentList
-                .frame(maxHeight: 180)
+            lyricCaptionView(fontSize: latestFontSize)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         }
     }
 
     private var landscapeBody: some View {
-        HStack(spacing: 22) {
-            VStack(spacing: 16) {
-                latestCaptionText(fontSize: latestFontSize + 10, lineLimit: 4)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-
-                hintView
-            }
-
-            recentList
-                .frame(width: horizontalSizeClass == .regular ? 340 : 260)
-        }
-    }
-
-    private var recentList: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.vertical) {
-                VStack(alignment: .leading, spacing: 10) {
-                    ForEach(Array(recentCaptionTexts.enumerated()), id: \.offset) { index, text in
-                        Text(text)
-                            .font(.system(size: recentFontSize, weight: .semibold, design: .rounded))
-                            .foregroundStyle(settings.secondaryText)
-                            .lineLimit(nil)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .id(index)
-                    }
-                    Spacer(minLength: 0)
-                        .id("recent-caption-bottom")
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .scrollIndicators(.visible)
-            .onChange(of: recentCaptionTexts) { _, _ in
-                withAnimation(.easeOut(duration: 0.18)) {
-                    proxy.scrollTo("recent-caption-bottom", anchor: .bottom)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        lyricCaptionView(fontSize: latestFontSize + 10)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 
     private var hintView: some View {
@@ -165,44 +124,124 @@ struct CaptionScreen: View {
         .foregroundStyle(settings.secondaryText)
     }
 
-    private func latestCaptionText(fontSize: CGFloat, lineLimit: Int) -> some View {
+    private var primaryControlBar: some View {
+        HStack(spacing: 14) {
+            Button {
+                settings.landscapeMode.toggle()
+            } label: {
+                Label(settings.landscapeMode ? "竖屏" : "横屏", systemImage: "rectangle.rotate.90")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(CaptionButtonStyle())
+
+            microphoneButton
+
+            Button {
+                showEndDialog = true
+            } label: {
+                Label("结束", systemImage: "xmark.circle")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(CaptionButtonStyle())
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.bottom, 10)
+    }
+
+    private func lyricCaptionView(fontSize: CGFloat) -> some View {
         ScrollViewReader { proxy in
             ScrollView(.vertical) {
-                VStack {
-                    Text(session.latestText)
-                        .font(.system(size: fontSize, weight: .bold, design: .rounded))
-                        .foregroundStyle(settings.primaryText)
-                        .lineLimit(nil)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, isTranslatingText ? 18 : 0)
-                        .padding(.vertical, isTranslatingText ? 12 : 0)
-                        .background {
-                            if isTranslatingText {
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(translatingHighlightColor)
-                            }
+                VStack(spacing: 18) {
+                    if lyricLines.isEmpty {
+                        Text("请打开通话扬声器")
+                            .font(.system(size: fontSize, weight: .bold, design: .rounded))
+                            .foregroundStyle(settings.primaryText)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity)
+                    } else {
+                        ForEach(lyricLines) { line in
+                            Text(line.text)
+                                .font(.system(size: fontSize, weight: .bold, design: .rounded))
+                                .foregroundStyle(line.isCurrent ? settings.primaryText : settings.secondaryText)
+                                .lineLimit(nil)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .multilineTextAlignment(.center)
+                                .frame(maxWidth: .infinity)
+                                .padding(.horizontal, line.isCurrent ? 18 : 0)
+                                .padding(.vertical, line.isCurrent ? 12 : 0)
+                                .background {
+                                    if line.isCurrent {
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .fill(translatingHighlightColor)
+                                    }
+                                }
+                                .overlay {
+                                    if line.isCurrent {
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .stroke(settings.primaryText.opacity(0.28), lineWidth: 1)
+                                    }
+                                }
+                                .id(line.id)
+                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                                .animation(.easeInOut(duration: 0.18), value: line.text)
                         }
-                        .overlay {
-                            if isTranslatingText {
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(settings.primaryText.opacity(0.28), lineWidth: 1)
-                            }
-                        }
+                    }
+
+                    if case .failed(let message) = session.state {
+                        Text(message)
+                            .font(.system(size: fontSize * 0.64, weight: .bold, design: .rounded))
+                            .foregroundStyle(.red)
+                            .lineLimit(nil)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity)
+                            .id("caption-error")
+                    }
+
                     Color.clear
                         .frame(height: 1)
-                        .id("latest-caption-bottom")
+                        .id("lyric-caption-bottom")
                 }
                 .frame(maxWidth: .infinity, minHeight: 1, alignment: .center)
+                .padding(.vertical, 12)
             }
             .scrollIndicators(.hidden)
-            .onChange(of: session.latestText) { _, _ in
-                withAnimation(.easeOut(duration: 0.18)) {
-                    proxy.scrollTo("latest-caption-bottom", anchor: .bottom)
+            .onChange(of: lyricScrollKey) { _, _ in
+                withAnimation(.easeOut(duration: 0.22)) {
+                    proxy.scrollTo("lyric-caption-bottom", anchor: .bottom)
                 }
             }
-            .animation(.easeInOut(duration: 0.16), value: isTranslatingText)
         }
+    }
+
+    private var lyricLines: [LyricCaptionLine] {
+        var lines = session.lines.suffix(12).map {
+            LyricCaptionLine(id: $0.id.uuidString, text: $0.text, isCurrent: false)
+        }
+        let currentText = session.partialText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !currentText.isEmpty {
+            if let lastIndex = lines.indices.last, lines[lastIndex].text == currentText {
+                lines[lastIndex] = LyricCaptionLine(
+                    id: lines[lastIndex].id,
+                    text: currentText,
+                    isCurrent: true
+                )
+            } else {
+                lines.append(LyricCaptionLine(
+                    id: "current-\(currentText)",
+                    text: currentText,
+                    isCurrent: true
+                ))
+            }
+        }
+        return Array(lines.suffix(12))
+    }
+
+    private var lyricScrollKey: String {
+        if case .failed(let message) = session.state {
+            return "failed-\(message)"
+        }
+        return lyricLines.map { "\($0.id):\($0.text)" }.joined(separator: "|")
     }
 
     private var microphoneButton: some View {
@@ -224,44 +263,10 @@ struct CaptionScreen: View {
         .disabled(session.state == .requestingPermission)
         .opacity(session.state == .requestingPermission ? 0.64 : 1)
         .accessibilityLabel(primaryButtonTitle)
-        .padding(.top, 18)
-        .padding(.bottom, 14)
-    }
-
-    private var secondaryControlBar: some View {
-        HStack(spacing: 12) {
-            Button {
-                settings.landscapeMode.toggle()
-            } label: {
-                Label(settings.landscapeMode ? "竖屏" : "横屏", systemImage: "rectangle.rotate.90")
-            }
-            .buttonStyle(CaptionButtonStyle())
-
-            Button {
-                showEndDialog = true
-            } label: {
-                Label("结束", systemImage: "xmark.circle")
-            }
-            .buttonStyle(CaptionButtonStyle())
-        }
-        .padding(.top, 12)
     }
 
     private var latestFontSize: CGFloat {
         CGFloat(42 + settings.fontScale * 34)
-    }
-
-    private var recentFontSize: CGFloat {
-        CGFloat(18 + settings.fontScale * 8)
-    }
-
-    private var recentCaptionTexts: [String] {
-        var texts = session.recentLines.map(\.text)
-        let currentText = session.partialText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !currentText.isEmpty, texts.last != currentText {
-            texts.append(currentText)
-        }
-        return Array(texts.suffix(20))
     }
 
     private var statusText: String {
@@ -339,6 +344,12 @@ struct CaptionScreen: View {
     private var inputPercent: Int {
         Int((session.inputLevel * 100).rounded())
     }
+}
+
+private struct LyricCaptionLine: Identifiable, Equatable {
+    let id: String
+    let text: String
+    let isCurrent: Bool
 }
 
 private struct CaptionButtonStyle: ButtonStyle {
