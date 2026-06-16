@@ -74,7 +74,7 @@ final class CaptionSession: ObservableObject {
     }
 
     var recentLines: [TranscriptLine] {
-        Array(lines.suffix(4).reversed())
+        Array(lines.suffix(20))
     }
 
     func requestAutoStart() {

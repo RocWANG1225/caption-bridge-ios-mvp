@@ -22,7 +22,9 @@ struct CaptionScreen: View {
                     portraitBody
                 }
 
-                controlBar
+                microphoneButton
+
+                secondaryControlBar
             }
             .foregroundStyle(settings.primaryText)
             .padding(.horizontal, 20)
@@ -97,14 +99,8 @@ struct CaptionScreen: View {
         VStack(alignment: .leading, spacing: 18) {
             Spacer(minLength: 8)
 
-            Text(session.latestText)
-                .font(.system(size: latestFontSize, weight: .bold, design: .rounded))
-                .minimumScaleFactor(0.38)
-                .lineLimit(5)
+            latestCaptionText(fontSize: latestFontSize, lineLimit: 5)
                 .frame(maxWidth: .infinity, minHeight: 260, alignment: .center)
-                .multilineTextAlignment(.center)
-
-            permissionView
 
             hintView
 
@@ -116,14 +112,8 @@ struct CaptionScreen: View {
     private var landscapeBody: some View {
         HStack(spacing: 22) {
             VStack(spacing: 16) {
-                Text(session.latestText)
-                    .font(.system(size: latestFontSize + 10, weight: .bold, design: .rounded))
-                    .minimumScaleFactor(0.34)
-                    .lineLimit(4)
+                latestCaptionText(fontSize: latestFontSize + 10, lineLimit: 4)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                    .multilineTextAlignment(.center)
-
-                permissionView
 
                 hintView
             }
@@ -134,38 +124,31 @@ struct CaptionScreen: View {
     }
 
     private var recentList: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ForEach(session.recentLines) { line in
-                Text(line.text)
-                    .font(.system(size: recentFontSize, weight: .semibold, design: .rounded))
-                    .foregroundStyle(settings.secondaryText)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.7)
+        ScrollViewReader { proxy in
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(Array(recentCaptionTexts.enumerated()), id: \.offset) { index, text in
+                        Text(text)
+                            .font(.system(size: recentFontSize, weight: .semibold, design: .rounded))
+                            .foregroundStyle(settings.secondaryText)
+                            .lineLimit(nil)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .id(index)
+                    }
+                    Spacer(minLength: 0)
+                        .id("recent-caption-bottom")
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            Spacer(minLength: 0)
+            .scrollIndicators(.visible)
+            .onChange(of: recentCaptionTexts) { _, _ in
+                withAnimation(.easeOut(duration: 0.18)) {
+                    proxy.scrollTo("recent-caption-bottom", anchor: .bottom)
+                }
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    @ViewBuilder
-    private var permissionView: some View {
-        if !session.canAutoStart && session.state != .listening {
-            VStack(spacing: 12) {
-                Text(session.permissionStatusText)
-                    .font(.title3.weight(.semibold))
-                    .multilineTextAlignment(.center)
-
-                Button {
-                    session.toggleMicrophone()
-                } label: {
-                    Label("启用麦克风和语音识别", systemImage: "mic.badge.plus")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(CaptionButtonStyle())
-            }
-            .padding(16)
-            .background(.primary.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
-        }
     }
 
     private var hintView: some View {
@@ -182,16 +165,71 @@ struct CaptionScreen: View {
         .foregroundStyle(settings.secondaryText)
     }
 
-    private var controlBar: some View {
-        HStack(spacing: 12) {
-            Button {
-                session.toggleMicrophone()
-            } label: {
-                Label(primaryButtonTitle, systemImage: primaryButtonIcon)
+    private func latestCaptionText(fontSize: CGFloat, lineLimit: Int) -> some View {
+        ScrollViewReader { proxy in
+            ScrollView(.vertical) {
+                VStack {
+                    Text(session.latestText)
+                        .font(.system(size: fontSize, weight: .bold, design: .rounded))
+                        .foregroundStyle(settings.primaryText)
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, isTranslatingText ? 18 : 0)
+                        .padding(.vertical, isTranslatingText ? 12 : 0)
+                        .background {
+                            if isTranslatingText {
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(translatingHighlightColor)
+                            }
+                        }
+                        .overlay {
+                            if isTranslatingText {
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(settings.primaryText.opacity(0.28), lineWidth: 1)
+                            }
+                        }
+                    Color.clear
+                        .frame(height: 1)
+                        .id("latest-caption-bottom")
+                }
+                .frame(maxWidth: .infinity, minHeight: 1, alignment: .center)
             }
-            .buttonStyle(CaptionButtonStyle())
-            .disabled(session.state == .requestingPermission)
+            .scrollIndicators(.hidden)
+            .onChange(of: session.latestText) { _, _ in
+                withAnimation(.easeOut(duration: 0.18)) {
+                    proxy.scrollTo("latest-caption-bottom", anchor: .bottom)
+                }
+            }
+            .animation(.easeInOut(duration: 0.16), value: isTranslatingText)
+        }
+    }
 
+    private var microphoneButton: some View {
+        Button {
+            session.toggleMicrophone()
+        } label: {
+            Image(systemName: primaryButtonIcon)
+                .font(.system(size: 38, weight: .bold))
+                .frame(width: 96, height: 96)
+                .foregroundStyle(microphoneIconColor)
+                .background(microphoneBackgroundColor, in: Circle())
+                .overlay {
+                    Circle()
+                        .stroke(settings.primaryText.opacity(0.22), lineWidth: 1)
+                }
+                .shadow(color: .black.opacity(0.22), radius: 14, y: 8)
+        }
+        .buttonStyle(.plain)
+        .disabled(session.state == .requestingPermission)
+        .opacity(session.state == .requestingPermission ? 0.64 : 1)
+        .accessibilityLabel(primaryButtonTitle)
+        .padding(.top, 18)
+        .padding(.bottom, 14)
+    }
+
+    private var secondaryControlBar: some View {
+        HStack(spacing: 12) {
             Button {
                 settings.landscapeMode.toggle()
             } label: {
@@ -215,6 +253,15 @@ struct CaptionScreen: View {
 
     private var recentFontSize: CGFloat {
         CGFloat(18 + settings.fontScale * 8)
+    }
+
+    private var recentCaptionTexts: [String] {
+        var texts = session.recentLines.map(\.text)
+        let currentText = session.partialText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !currentText.isEmpty, texts.last != currentText {
+            texts.append(currentText)
+        }
+        return Array(texts.suffix(20))
     }
 
     private var statusText: String {
@@ -246,6 +293,47 @@ struct CaptionScreen: View {
 
     private var primaryButtonIcon: String {
         session.isMicrophoneEnabled ? "mic.fill" : "mic.slash.fill"
+    }
+
+    private var microphoneBackgroundColor: Color {
+        switch session.state {
+        case .listening:
+            .green.opacity(0.26)
+        case .requestingPermission:
+            .orange.opacity(0.24)
+        case .failed:
+            .red.opacity(0.24)
+        default:
+            settings.primaryText.opacity(0.14)
+        }
+    }
+
+    private var microphoneIconColor: Color {
+        switch session.state {
+        case .listening:
+            .green
+        case .requestingPermission:
+            .orange
+        case .failed:
+            .red
+        default:
+            settings.primaryText
+        }
+    }
+
+    private var isTranslatingText: Bool {
+        !session.partialText.isEmpty
+    }
+
+    private var translatingHighlightColor: Color {
+        switch settings.theme {
+        case .yellowBlack:
+            Color.white.opacity(0.18)
+        case .whiteBlack:
+            Color.yellow.opacity(0.36)
+        default:
+            Color.yellow.opacity(0.24)
+        }
     }
 
     private var inputPercent: Int {
