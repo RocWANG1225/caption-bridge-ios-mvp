@@ -65,9 +65,6 @@ struct CaptionScreen: View {
         }
         .task {
             session.refreshPermissions()
-            if case .idle = session.state, session.canAutoStart {
-                await session.start()
-            }
         }
     }
 
@@ -79,7 +76,8 @@ struct CaptionScreen: View {
 
             Text(statusText)
                 .font(.subheadline.weight(.semibold))
-                .lineLimit(1)
+                .lineLimit(2)
+                .minimumScaleFactor(0.72)
 
             Spacer()
 
@@ -158,7 +156,7 @@ struct CaptionScreen: View {
                     .multilineTextAlignment(.center)
 
                 Button {
-                    session.requestAutoStart()
+                    session.toggleMicrophone()
                 } label: {
                     Label("启用麦克风和语音识别", systemImage: "mic.badge.plus")
                         .frame(maxWidth: .infinity)
@@ -173,7 +171,7 @@ struct CaptionScreen: View {
     private var hintView: some View {
         HStack(spacing: 10) {
             Image(systemName: "speaker.wave.2.fill")
-            Text(session.noiseHint ?? "请打开电话或微信扬声器，手机靠近外放声音")
+            Text(session.noiseHint ?? "\(session.audioDebugText)，音量 \(inputPercent)%")
                 .lineLimit(2)
                 .minimumScaleFactor(0.8)
             Spacer()
@@ -187,18 +185,12 @@ struct CaptionScreen: View {
     private var controlBar: some View {
         HStack(spacing: 12) {
             Button {
-                switch session.state {
-                case .listening:
-                    session.pause()
-                case .paused, .idle, .failed:
-                    session.requestAutoStart()
-                case .requestingPermission:
-                    break
-                }
+                session.toggleMicrophone()
             } label: {
                 Label(primaryButtonTitle, systemImage: primaryButtonIcon)
             }
             .buttonStyle(CaptionButtonStyle())
+            .disabled(session.state == .requestingPermission)
 
             Button {
                 settings.landscapeMode.toggle()
@@ -230,7 +222,7 @@ struct CaptionScreen: View {
         case .idle: "待命"
         case .requestingPermission: "正在请求权限"
         case .listening: "正在实时字幕"
-        case .paused: "已暂停"
+        case .paused: "麦克风已关闭"
         case .failed(let message): message
         }
     }
@@ -246,14 +238,18 @@ struct CaptionScreen: View {
 
     private var primaryButtonTitle: String {
         switch session.state {
-        case .listening: "暂停"
         case .requestingPermission: "启动中"
-        default: "开始"
+        case .listening: "麦克风关"
+        default: "麦克风开"
         }
     }
 
     private var primaryButtonIcon: String {
-        session.state == .listening ? "pause.fill" : "mic.fill"
+        session.isMicrophoneEnabled ? "mic.fill" : "mic.slash.fill"
+    }
+
+    private var inputPercent: Int {
+        Int((session.inputLevel * 100).rounded())
     }
 }
 

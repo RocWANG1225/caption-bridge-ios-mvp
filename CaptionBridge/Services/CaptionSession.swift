@@ -20,6 +20,8 @@ final class CaptionSession: ObservableObject {
     @Published private(set) var noiseHint: String?
     @Published private(set) var permissionStatusText = "点击开始后允许麦克风和语音识别"
     @Published private(set) var canAutoStart = false
+    @Published private(set) var audioDebugText = "麦克风待命"
+    @Published private(set) var isMicrophoneEnabled = false
 
     private let speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "zh_CN"))
     private let audioEngine = AVAudioEngine()
@@ -27,8 +29,44 @@ final class CaptionSession: ObservableObject {
     private var recognitionTask: SFSpeechRecognitionTask?
     private var silenceSamples = 0
     private var isStoppingIntentionally = false
+    private var loudSamples = 0
+    private var startTask: Task<Void, Never>?
+    private var isInputTapInstalled = false
+    private let audioSessionAttempts: [AudioSessionAttempt] = [
+        AudioSessionAttempt(
+            name: "外放监听",
+            category: .playAndRecord,
+            mode: .measurement,
+            options: [.defaultToSpeaker, .mixWithOthers],
+            tuneForSpeech: true
+        ),
+        AudioSessionAttempt(
+            name: "兼容监听",
+            category: .playAndRecord,
+            mode: .default,
+            options: [.defaultToSpeaker, .mixWithOthers],
+            tuneForSpeech: false
+        ),
+        AudioSessionAttempt(
+            name: "纯麦克风",
+            category: .record,
+            mode: .measurement,
+            options: [],
+            tuneForSpeech: true
+        ),
+        AudioSessionAttempt(
+            name: "基础麦克风",
+            category: .record,
+            mode: .default,
+            options: [],
+            tuneForSpeech: false
+        )
+    ]
 
     var latestText: String {
+        if case .failed(let message) = state {
+            return message
+        }
         if !partialText.isEmpty {
             return partialText
         }
@@ -40,8 +78,21 @@ final class CaptionSession: ObservableObject {
     }
 
     func requestAutoStart() {
-        Task {
+        guard startTask == nil else { return }
+        startTask = Task {
             await start()
+            startTask = nil
+        }
+    }
+
+    func toggleMicrophone() {
+        switch state {
+        case .listening:
+            turnMicrophoneOff()
+        case .requestingPermission:
+            break
+        case .idle, .paused, .failed:
+            requestAutoStart()
         }
     }
 
@@ -63,7 +114,7 @@ final class CaptionSession: ObservableObject {
     }
 
     func start() async {
-        guard state != .listening else { return }
+        guard state != .listening, state != .requestingPermission else { return }
         state = .requestingPermission
 
         do {
@@ -71,16 +122,18 @@ final class CaptionSession: ObservableObject {
             refreshPermissions()
             try startRecognition()
             UIApplication.shared.isIdleTimerDisabled = true
+            isMicrophoneEnabled = true
             state = .listening
         } catch {
-            state = .failed(error.localizedDescription)
+            stopAudio(keepText: true)
+            state = .failed("启动失败：\(error.localizedDescription)")
+            isMicrophoneEnabled = false
             UIApplication.shared.isIdleTimerDisabled = false
         }
     }
 
     func pause() {
-        stopAudio(keepText: true)
-        state = .paused
+        turnMicrophoneOff()
     }
 
     func resume() {
@@ -89,11 +142,24 @@ final class CaptionSession: ObservableObject {
         }
     }
 
+    func turnMicrophoneOff() {
+        startTask?.cancel()
+        startTask = nil
+        stopAudio(keepText: true)
+        isMicrophoneEnabled = false
+        inputLevel = 0
+        noiseHint = nil
+        audioDebugText = "麦克风已关闭"
+        state = .paused
+    }
+
     func endSession(autoClear: Bool) {
         stopAudio(keepText: !autoClear)
         if autoClear {
             clear()
         }
+        isMicrophoneEnabled = false
+        inputLevel = 0
         state = .idle
     }
 
@@ -101,6 +167,7 @@ final class CaptionSession: ObservableObject {
         lines.removeAll()
         partialText = ""
         noiseHint = nil
+        audioDebugText = "麦克风待命"
     }
 
     func exportTranscript() -> String {
@@ -162,19 +229,20 @@ final class CaptionSession: ObservableObject {
     }
 
     private func startRecognition() throws {
-        stopAudio(keepText: true)
+        stopAudioIfNeeded(keepText: true)
         isStoppingIntentionally = false
+        loudSamples = 0
+        silenceSamples = 0
 
         guard let speechRecognizer, speechRecognizer.isAvailable else {
             throw CaptionError.recognizerUnavailable
         }
 
-        let audioSession = AVAudioSession.sharedInstance()
-        try audioSession.setCategory(.playAndRecord, mode: .measurement, options: [.defaultToSpeaker, .allowBluetoothHFP])
-        try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+        try configureAudioSessionForSpeakerListening()
 
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
+        request.taskHint = .dictation
         if #available(iOS 16.0, *) {
             request.addsPunctuation = true
         }
@@ -182,13 +250,14 @@ final class CaptionSession: ObservableObject {
 
         let inputNode = audioEngine.inputNode
         let format = inputNode.outputFormat(forBus: 0)
-        inputNode.removeTap(onBus: 0)
+        removeInputTapIfNeeded()
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
             self?.recognitionRequest?.append(buffer)
             Task { @MainActor in
                 self?.updateInputLevel(from: buffer)
             }
         }
+        isInputTapInstalled = true
 
         audioEngine.prepare()
         try audioEngine.start()
@@ -200,11 +269,42 @@ final class CaptionSession: ObservableObject {
                     self.handleRecognition(result)
                 }
                 if let error, !self.isStoppingIntentionally {
-                    self.state = .failed(error.localizedDescription)
                     self.stopAudio(keepText: true)
+                    self.isMicrophoneEnabled = false
+                    self.state = .failed("识别失败：\(error.localizedDescription)")
                 }
             }
         }
+    }
+
+    private func configureAudioSessionForSpeakerListening() throws {
+        let audioSession = AVAudioSession.sharedInstance()
+        var lastError: Error?
+
+        for attempt in audioSessionAttempts {
+            do {
+                try? audioSession.setActive(false, options: .notifyOthersOnDeactivation)
+                try audioSession.setCategory(attempt.category, mode: attempt.mode, options: attempt.options)
+
+                if attempt.tuneForSpeech {
+                    try? audioSession.setPreferredSampleRate(16_000)
+                    try? audioSession.setPreferredIOBufferDuration(0.02)
+                }
+
+                try audioSession.setActive(true)
+
+                if let builtInMic = audioSession.availableInputs?.first(where: { $0.portType == .builtInMic }) {
+                    try? audioSession.setPreferredInput(builtInMic)
+                }
+
+                updateAudioRouteDebug(prefix: attempt.name)
+                return
+            } catch {
+                lastError = error
+            }
+        }
+
+        throw CaptionError.audioSessionActivationFailed(lastError?.localizedDescription ?? "系统拒绝启动麦克风")
     }
 
     private func handleRecognition(_ result: SFSpeechRecognitionResult) {
@@ -245,12 +345,31 @@ final class CaptionSession: ObservableObject {
             silenceSamples = 0
         }
 
+        if inputLevel > 0.10 {
+            loudSamples += 1
+        }
+
         if silenceSamples > 80 {
-            noiseHint = "声音较小，请确认已打开扬声器并靠近手机"
+            noiseHint = "麦克风几乎没收到声音，请确认外放并靠近另一台设备"
         } else if inputLevel > 0.86 {
             noiseHint = "环境声较大，字幕可能不准"
+        } else if loudSamples > 50 && partialText.isEmpty && lines.isEmpty {
+            noiseHint = "已听到声音，正在识别；请尽量使用普通话并保持外放清晰"
         } else {
             noiseHint = nil
+        }
+
+        updateAudioRouteDebug()
+    }
+
+    private func updateAudioRouteDebug(prefix: String? = nil) {
+        let route = AVAudioSession.sharedInstance().currentRoute
+        let inputName = route.inputs.first?.portName ?? "无输入"
+        let inputType = route.inputs.first?.portType.rawValue ?? "unknown"
+        if let prefix {
+            audioDebugText = "\(prefix)：\(inputName) / \(inputType)"
+        } else {
+            audioDebugText = "输入：\(inputName) / \(inputType)"
         }
     }
 
@@ -264,7 +383,7 @@ final class CaptionSession: ObservableObject {
         if audioEngine.isRunning {
             audioEngine.stop()
         }
-        audioEngine.inputNode.removeTap(onBus: 0)
+        removeInputTapIfNeeded()
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         UIApplication.shared.isIdleTimerDisabled = false
 
@@ -273,18 +392,42 @@ final class CaptionSession: ObservableObject {
         }
         partialText = ""
     }
+
+    private func stopAudioIfNeeded(keepText: Bool) {
+        guard recognitionTask != nil || recognitionRequest != nil || audioEngine.isRunning || isInputTapInstalled else {
+            return
+        }
+        stopAudio(keepText: keepText)
+    }
+
+    private func removeInputTapIfNeeded() {
+        guard isInputTapInstalled else { return }
+        audioEngine.inputNode.removeTap(onBus: 0)
+        isInputTapInstalled = false
+    }
+}
+
+private struct AudioSessionAttempt {
+    let name: String
+    let category: AVAudioSession.Category
+    let mode: AVAudioSession.Mode
+    let options: AVAudioSession.CategoryOptions
+    let tuneForSpeech: Bool
 }
 
 enum CaptionError: LocalizedError {
     case permissionDenied(String)
     case recognizerUnavailable
     case emptyTranscript
+    case audioSessionActivationFailed(String)
 
     var errorDescription: String? {
         switch self {
         case .permissionDenied(let message): message
         case .recognizerUnavailable: "当前设备暂时无法使用普通话语音识别。"
         case .emptyTranscript: "当前没有可保存的字幕文字。"
+        case .audioSessionActivationFailed(let detail):
+            "麦克风启动失败。本机如果正在电话或微信通话，iOS 可能正在占用麦克风；请让字幕手机不要加入通话，只靠近另一台手机的扬声器。系统信息：\(detail)"
         }
     }
 }
