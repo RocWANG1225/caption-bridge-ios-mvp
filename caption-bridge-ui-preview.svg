@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="390" height="844" viewBox="0 0 390 844">
+  <rect width="390" height="844" fill="#050505"/>
+
+  <circle cx="32" cy="36" r="5" fill="#35d06f"/>
+  <text x="48" y="42" fill="#b8b8b8" font-family="Arial, 'PingFang SC', sans-serif" font-size="14" font-weight="700">正在实时字幕</text>
+  <text x="342" y="43" fill="#d8d8d8" font-family="Arial, sans-serif" font-size="24" font-weight="700">A</text>
+
+  <rect x="24" y="78" width="342" height="538" rx="8" fill="#0d0d0d" stroke="#242424"/>
+  <text x="195" y="178" fill="#777777" font-family="Arial, 'PingFang SC', sans-serif" font-size="27" font-weight="800" text-anchor="middle">我们把手机放桌上</text>
+  <text x="195" y="246" fill="#a8a8a8" font-family="Arial, 'PingFang SC', sans-serif" font-size="31" font-weight="800" text-anchor="middle">打开扬声器外放</text>
+  <text x="195" y="322" fill="#ffffff" font-family="Arial, 'PingFang SC', sans-serif" font-size="38" font-weight="800" text-anchor="middle">字幕会像歌词一样</text>
+  <rect x="46" y="360" width="298" height="70" rx="8" fill="#6d6213" stroke="#c0ae34"/>
+  <text x="195" y="404" fill="#ffffff" font-family="Arial, 'PingFang SC', sans-serif" font-size="29" font-weight="800" text-anchor="middle">一句一句滚动显示</text>
+  <text x="195" y="504" fill="#5f5f5f" font-family="Arial, 'PingFang SC', sans-serif" font-size="18" font-weight="700" text-anchor="middle">最新转写文字高亮，落定后进入字幕流</text>
+
+  <rect x="32" y="676" width="96" height="48" rx="8" fill="#222222"/>
+  <text x="80" y="706" fill="#ffffff" font-family="Arial, 'PingFang SC', sans-serif" font-size="17" font-weight="700" text-anchor="middle">横屏</text>
+
+  <circle cx="195" cy="700" r="48" fill="#113d20" stroke="#6f8f76"/>
+  <path d="M195 672c-9 0-16 7-16 16v16c0 9 7 16 16 16s16-7 16-16v-16c0-9-7-16-16-16z" fill="#38d872"/>
+  <path d="M172 699c0 13 10 23 23 23s23-10 23-23" fill="none" stroke="#38d872" stroke-width="6" stroke-linecap="round"/>
+  <path d="M195 722v16M184 738h22" stroke="#38d872" stroke-width="6" stroke-linecap="round"/>
+
+  <rect x="262" y="676" width="96" height="48" rx="8" fill="#222222"/>
+  <text x="310" y="706" fill="#ffffff" font-family="Arial, 'PingFang SC', sans-serif" font-size="17" font-weight="700" text-anchor="middle">结束</text>
+
+  <rect x="20" y="772" width="350" height="44" rx="8" fill="#111111" stroke="#262626"/>
+  <text x="42" y="799" fill="#b8b8b8" font-family="Arial, 'PingFang SC', sans-serif" font-size="14" font-weight="700">输入：iPhone 麦克风，音量 62%</text>
+  <rect x="286" y="790" width="62" height="8" rx="4" fill="#3a3a3a"/>
+  <rect x="286" y="790" width="39" height="8" rx="4" fill="#d8d8d8"/>
+</svg>
